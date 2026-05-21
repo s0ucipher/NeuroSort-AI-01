@@ -256,6 +256,27 @@ def save_organized():
         return jsonify({"error": "An error occurred while saving organized files."}), 500
 
 
+@app.route("/chat", methods=["POST"])
+@app.route("/api/chat", methods=["POST"])
+def chat():
+    data = request.json or {}
+    message = data.get("message", "")
+    files_metadata = data.get("files_metadata") or []
+    sources = data.get("sources") or []
+    api_key = data.get("api_key") or None
+
+    if not message:
+        return jsonify({"error": "Message is required."}), 400
+
+    try:
+        from organizer import chat_with_s0ucipher
+        response = chat_with_s0ucipher(message, files_metadata=files_metadata, sources=sources, api_key=api_key)
+        return jsonify({"response": response})
+    except Exception as error:
+        print(f"Error in s0ucipher chat: {str(error)}")
+        return jsonify({"error": "An error occurred while chatting with s0ucipher."}), 500
+
+
 @app.route("/", defaults={"path": ""})
 @app.route("/<path:path>")
 def serve_frontend(path):
@@ -277,5 +298,5 @@ def serve_frontend(path):
 
 
 if __name__ == "__main__":
-    port = int(os.getenv("PORT", "5050"))
+    port = int(os.getenv("PORT", "5055"))
     app.run(host="0.0.0.0", debug=True, port=port, use_reloader=False)

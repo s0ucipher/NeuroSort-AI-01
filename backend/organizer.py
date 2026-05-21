@@ -6,17 +6,63 @@ from datetime import datetime, timedelta
 
 CATEGORY_FOLDERS = {
     "Study": "Study Hub",
-    "Images": "Images",
+    "Photos": "Photos",
+    "PDFs": "PDFs",
     "Documents": "Documents",
     "Videos": "Videos",
+    "Audio": "Audio",
+    "Archives": "Archives",
+    "Code": "Code",
     "Others": "Others",
 }
 
 SORTED_EXTENSIONS = {
-    "Images": (".jpg", ".jpeg", ".png", ".gif", ".webp", ".heic", ".svg"),
-    "Documents": (".pdf", ".docx", ".doc", ".txt", ".pptx", ".xlsx", ".csv"),
-    "Videos": (".mp4", ".mkv", ".mov", ".avi", ".webm"),
+    "Photos": (".jpg", ".jpeg", ".png", ".gif", ".webp", ".heic", ".heif", ".svg", ".bmp", ".tif", ".tiff"),
+    "PDFs": (".pdf",),
+    "Documents": (".docx", ".doc", ".txt", ".pptx", ".ppt", ".xlsx", ".xls", ".csv", ".md", ".rtf"),
+    "Videos": (".mp4", ".mkv", ".mov", ".avi", ".webm", ".m4v"),
+    "Audio": (".mp3", ".wav", ".aac", ".m4a", ".flac", ".ogg"),
+    "Archives": (".zip", ".rar", ".7z", ".tar", ".gz"),
+    "Code": (".py", ".js", ".jsx", ".ts", ".tsx", ".html", ".css", ".json", ".java", ".c", ".cpp", ".swift"),
 }
+
+STUDY_KEYWORDS = (
+    "notes",
+    "assignment",
+    "homework",
+    "lecture",
+    "syllabus",
+    "class",
+    "semester",
+    "question",
+    "solution",
+)
+
+HIGH_PRIORITY_KEYWORDS = (
+    "final",
+    "exam",
+    "urgent",
+    "deadline",
+    "submit",
+    "admit",
+    "marksheet",
+    "certificate",
+    "result",
+    "resume",
+    "tax",
+)
+
+MEDIUM_PRIORITY_KEYWORDS = (
+    "notes",
+    "assignment",
+    "project",
+    "report",
+    "proposal",
+    "draft",
+    "important",
+    "invoice",
+    "receipt",
+)
 
 IGNORED_DIRECTORIES = {
     ".git",
@@ -25,7 +71,6 @@ IGNORED_DIRECTORIES = {
     "dist",
     "node_modules",
     "NeuroSort Organized",
-    *CATEGORY_FOLDERS.values(),
 }
 
 IGNORED_FILES = {".DS_Store", "Thumbs.db"}
@@ -34,44 +79,29 @@ IGNORED_FILES = {".DS_Store", "Thumbs.db"}
 def classify_file(file):
     name = file.lower()
 
-    if "notes" in name or "assignment" in name:
+    if any(keyword in name for keyword in STUDY_KEYWORDS):
         return "Study"
 
-    elif name.endswith((".jpg", ".png")):
-        return "Images"
+    for category, extensions in SORTED_EXTENSIONS.items():
+        if name.endswith(extensions):
+            return category
 
-    elif name.endswith((".pdf", ".docx")):
-        return "Documents"
-
-    elif name.endswith((".mp4", ".mkv")):
-        return "Videos"
-
-    else:
-        return "Others"
+    return "Others"
 
 
 def get_priority(file):
     name = file.lower()
 
-    if "final" in name or "exam" in name:
+    if any(keyword in name for keyword in HIGH_PRIORITY_KEYWORDS):
         return "High"
-    elif "notes" in name:
+    if any(keyword in name for keyword in MEDIUM_PRIORITY_KEYWORDS):
         return "Medium"
-    else:
-        return "Low"
+
+    return "Low"
 
 
 def _classify_with_extra_extensions(file):
-    category = classify_file(file)
-    if category != "Others":
-        return category
-
-    lower_file = file.lower()
-    for extra_category, extensions in SORTED_EXTENSIONS.items():
-        if lower_file.endswith(extensions):
-            return extra_category
-
-    return category
+    return classify_file(file)
 
 
 def _normalize_path(path):
@@ -118,8 +148,16 @@ def _export_root(parent_folder):
 
 def _sort_records(records, sort_by):
     if sort_by == "type":
-        return sorted(records, key=lambda item: (item["type"], item["name"].lower(), item["source"].lower()))
-    return sorted(records, key=lambda item: (item["name"].lower(), item["source"].lower()))
+        return sorted(records, key=lambda item: (item.get("type") or "", item.get("name" or "").lower(), item.get("source" or "").lower()))
+    elif sort_by == "size-desc":
+        return sorted(records, key=lambda item: item.get("size_bytes") or 0, reverse=True)
+    elif sort_by == "size-asc":
+        return sorted(records, key=lambda item: item.get("size_bytes") or 0)
+    elif sort_by == "priority":
+        priority_weight = {"High": 3, "Medium": 2, "Low": 1}
+        return sorted(records, key=lambda item: (priority_weight.get(item.get("priority", "Low"), 0), item.get("name", "").lower()), reverse=True)
+    # Default: name (alphabetical)
+    return sorted(records, key=lambda item: (item.get("name") or "").lower())
 
 
 def _scan_sources(sources):
@@ -148,7 +186,13 @@ def _scan_sources(sources):
             continue
 
         for root, dirs, files in os.walk(expanded_source):
-            dirs[:] = [folder for folder in dirs if folder not in IGNORED_DIRECTORIES and not folder.startswith(".")]
+            dirs[:] = [
+                folder
+                for folder in dirs
+                if folder not in IGNORED_DIRECTORIES
+                and not folder.startswith(".")
+                and not folder.startswith("NeuroSort Export")
+            ]
 
             for file in files:
                 if file in IGNORED_FILES or file.startswith("."):
@@ -174,15 +218,25 @@ def _smart_tags(file_name, category, priority, duplicate_count, modified_time):
 
     if category == "Study":
         tags.append("academic")
+    if category == "Photos":
+        tags.append("photo")
+    if category == "PDFs":
+        tags.append("pdf")
+    if category == "Videos":
+        tags.append("video")
+    if category == "Documents":
+        tags.append("document")
     if priority == "High":
         tags.append("exam-ready")
+    if priority == "Medium":
+        tags.append("review-soon")
     if duplicate_count > 1:
         tags.append("duplicate-candidate")
     if modified_time < datetime.now() - timedelta(days=180):
         tags.append("cleanup-candidate")
     if "project" in name or "report" in name:
         tags.append("project-work")
-    if category in {"Images", "Videos"}:
+    if category in {"Photos", "Videos"}:
         tags.append("media")
 
     return tags or ["standard"]
@@ -194,9 +248,27 @@ def _confidence_for(category, priority, tags):
         score += 0.13
     if priority != "Low":
         score += 0.06
-    if "academic" in tags or "media" in tags:
+    if any(tag in tags for tag in ("academic", "media", "pdf", "document")):
         score += 0.04
     return min(score, 0.97)
+
+
+def _importance_score(file_name, category, priority, duplicate_count, modified_time):
+    score = {"High": 86, "Medium": 63, "Low": 34}[priority]
+    name = file_name.lower()
+
+    if category == "Study":
+        score += 7
+    if category in {"PDFs", "Documents"}:
+        score += 4
+    if "project" in name or "report" in name:
+        score += 4
+    if duplicate_count > 1:
+        score -= 4
+    if modified_time < datetime.now() - timedelta(days=365):
+        score -= 5
+
+    return max(18, min(score, 98))
 
 
 def _suggested_name(file_name, category, priority):
@@ -211,9 +283,11 @@ def _suggested_name(file_name, category, priority):
 
 def _ai_reason(file_name, category, priority, tags):
     if priority == "High":
-        return "s0ucipher found exam/final keywords, so this file is marked high priority."
+        return "s0ucipher found important deadline, exam, result, or certificate signals, so this file is high priority."
     if category == "Study":
-        return "s0ucipher detected study keywords like notes or assignment."
+        return "s0ucipher detected study keywords like notes, assignment, lecture, or syllabus."
+    if category == "PDFs":
+        return "s0ucipher recognized a PDF and separated it for document review."
     if category != "Others":
         return f"s0ucipher used the file extension to classify this as {category}."
     if "cleanup-candidate" in tags:
@@ -227,6 +301,7 @@ def _build_record(source_path, duplicate_count):
     priority = get_priority(file_name)
     modified_time = datetime.fromtimestamp(os.path.getmtime(source_path))
     tags = _smart_tags(file_name, category, priority, duplicate_count, modified_time)
+    importance_score = _importance_score(file_name, category, priority, duplicate_count, modified_time)
 
     return {
         "name": file_name,
@@ -240,6 +315,7 @@ def _build_record(source_path, duplicate_count):
         "smart_tags": tags,
         "ai_reason": _ai_reason(file_name, category, priority, tags),
         "confidence": round(_confidence_for(category, priority, tags), 2),
+        "importance_score": importance_score,
         "suggested_name": _suggested_name(file_name, category, priority),
     }
 
@@ -248,7 +324,7 @@ def _build_record_from_metadata(meta, duplicate_count):
     file_name = meta["name"]
     category = _classify_with_extra_extensions(file_name)
     priority = get_priority(file_name)
-    
+
     last_mod = meta.get("lastModified")
     if last_mod is not None:
         try:
@@ -257,9 +333,10 @@ def _build_record_from_metadata(meta, duplicate_count):
             modified_time = datetime.now()
     else:
         modified_time = datetime.now()
-        
+
     tags = _smart_tags(file_name, category, priority, duplicate_count, modified_time)
-    
+    importance_score = _importance_score(file_name, category, priority, duplicate_count, modified_time)
+
     return {
         "name": file_name,
         "source": meta.get("path") or file_name,
@@ -272,8 +349,19 @@ def _build_record_from_metadata(meta, duplicate_count):
         "smart_tags": tags,
         "ai_reason": _ai_reason(file_name, category, priority, tags),
         "confidence": round(_confidence_for(category, priority, tags), 2),
+        "importance_score": importance_score,
         "suggested_name": _suggested_name(file_name, category, priority),
     }
+
+
+def _metadata_source_count(files_metadata):
+    source_groups = set()
+    for meta in files_metadata:
+        path = meta.get("path") or meta.get("name") or ""
+        top_level = path.split("/", 1)[0] if "/" in path else path
+        if top_level:
+            source_groups.add(top_level)
+    return len(source_groups)
 
 
 def organize_metadata(files_metadata, sort_by="name"):
@@ -313,7 +401,7 @@ def organize_metadata(files_metadata, sort_by="name"):
 
     dashboard = {
         "total_files": len(records),
-        "source_count": 0,
+        "source_count": _metadata_source_count(files_metadata),
         "total_categories": sum(1 for values in categories.values() if values),
         "important_files": len(important_files),
         "study_files": len(study_files),
@@ -361,6 +449,8 @@ def _duplicate_groups(records):
 
 def _s0ucipher_assistant(records, dashboard, duplicate_groups, destination_path, apply_changes):
     high_priority = [record for record in records if record["priority"] == "High"]
+    medium_priority = [record for record in records if record["priority"] == "Medium"]
+    low_priority = [record for record in records if record["priority"] == "Low"]
     study_files = [record for record in records if record["category"] == "Study"]
     cleanup_files = [record for record in records if "cleanup-candidate" in record["smart_tags"]]
     category_counts = Counter(record["category"] for record in records)
@@ -371,6 +461,10 @@ def _s0ucipher_assistant(records, dashboard, duplicate_groups, destination_path,
         actions.append(f"Create a Study Hub with {len(study_files)} academic file(s).")
     if high_priority:
         actions.append(f"Highlight {len(high_priority)} exam/final file(s) as high priority.")
+    if medium_priority:
+        actions.append(f"Review {len(medium_priority)} medium-priority file(s) after the urgent set.")
+    if low_priority:
+        actions.append(f"Keep {len(low_priority)} low-priority file(s) organized without interrupting the main work.")
     if duplicate_groups:
         actions.append(f"Review {len(duplicate_groups)} duplicate name group(s) before deleting anything.")
     if cleanup_files:
@@ -382,7 +476,8 @@ def _s0ucipher_assistant(records, dashboard, duplicate_groups, destination_path,
         "name": "s0ucipher",
         "summary": (
             f"s0ucipher scanned {dashboard['total_files']} file(s) from {dashboard['source_count']} source(s). "
-            f"The strongest pattern is {strongest_category}, and the planned output is {destination_path}."
+            f"The strongest pattern is {strongest_category}; {len(high_priority)} high-priority file(s) should be handled first. "
+            f"The planned output is {destination_path}."
         ),
         "recommended_actions": actions,
         "study_plan": [
@@ -526,3 +621,141 @@ def save_organized_copy(sources, sort_by="name", destination_path=None, save_mod
             else "s0ucipher could not save files because no source files were available."
         ),
     }
+
+
+def call_gemini_api(prompt, api_key=None):
+    import urllib.request
+    import json
+    api_key_to_use = api_key or os.environ.get("GEMINI_API_KEY")
+    if not api_key_to_use:
+        return None
+
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key_to_use}"
+    headers = {"Content-Type": "application/json"}
+    payload = {
+        "contents": [
+            {
+                "parts": [
+                    {"text": prompt}
+                ]
+            }
+        ]
+    }
+
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers=headers,
+        method="POST"
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=15) as response:
+            res_data = json.loads(response.read().decode("utf-8"))
+            return res_data["candidates"][0]["content"]["parts"][0]["text"]
+    except Exception as e:
+        print(f"Error calling Gemini API: {str(e)}")
+        return None
+
+
+def chat_with_s0ucipher(message, files_metadata=None, sources=None, api_key=None):
+    records = []
+    if files_metadata:
+        duplicate_counts = Counter(meta.get("name", "").lower() for meta in files_metadata)
+        records = [_build_record_from_metadata(meta, duplicate_counts[meta.get("name", "").lower()]) for meta in files_metadata]
+    elif sources:
+        try:
+            _, source_files = _scan_sources(sources)
+            duplicate_counts = Counter(os.path.basename(path).lower() for path in source_files)
+            records = [_build_record(path, duplicate_counts[os.path.basename(path).lower()]) for path in source_files]
+        except Exception:
+            pass
+
+    # Try Gemini API first if key is present
+    api_key_to_use = api_key or os.environ.get("GEMINI_API_KEY")
+    if api_key_to_use:
+        context = ""
+        if records:
+            context = "Scanned Files Metadata:\n"
+            for r in records[:50]:  # limit to 50 for prompt size
+                context += f"- Name: {r['name']}, Category: {r['category']}, Priority: {r['priority']}, Size: {r['size_bytes']} bytes, AI Reason: {r['ai_reason']}\n"
+            if len(records) > 50:
+                context += f"... and {len(records) - 50} more files.\n"
+
+        system_instruction = (
+            "You are s0ucipher, a helpful, intelligent AI agent for a smart file manager named NeuroSort AI. "
+            "Your tone is futuristic, professional, supportive, and clever. "
+            "You help the user understand which files are important or less important, suggest name updates, "
+            "and explain your organization reasoning (e.g. why a file went into Study Hub, PDFs, Photos, etc.).\n"
+            f"Here is the context of files currently scanned:\n{context}\n"
+            "Respond to the user's query directly, concisely, and in-character."
+        )
+        prompt = f"{system_instruction}\n\nUser: {message}\ns0ucipher:"
+        gemini_response = call_gemini_api(prompt, api_key=api_key_to_use)
+        if gemini_response:
+            return gemini_response.strip()
+
+    # Heuristic fallback if Gemini API is not configured or fails
+    msg = message.lower()
+    total_files = len(records)
+
+    categories = Counter(r["category"] for r in records)
+    priorities = Counter(r["priority"] for r in records)
+    high_priority_files = [r["name"] for r in records if r["priority"] == "High"]
+    study_files = [r["name"] for r in records if r["category"] == "Study"]
+
+    matched_file = None
+    for r in records:
+        if r["name"].lower() in msg:
+            matched_file = r
+            break
+
+    if matched_file:
+        return (
+            f"Ah, let's look at **{matched_file['name']}**. I've categorized it under **{matched_file['category']}** "
+            f"(saving to folder *{matched_file['folder']}*) with a **{matched_file['priority']}** priority ranking. "
+            f"My reasoning: {matched_file['ai_reason']}"
+        )
+
+    if "importance" in msg or "priority" in msg or "important" in msg:
+        p_summary = ", ".join([f"{count} {p}" for p, count in priorities.items()]) if priorities else "no scanned files"
+        high_str = ""
+        if high_priority_files:
+            high_str = f" Some key high-importance files include: {', '.join(high_priority_files[:5])}."
+        return (
+            f"I evaluate file importance by scanning for critical keywords (like *exam*, *final*, *invoice*, *tax*) "
+            f"as well as checking their modification dates and duplication rates. In this batch, I found: **{p_summary}** files.{high_str}"
+        )
+
+    if "category" in msg or "categories" in msg or "folder" in msg or "folders" in msg:
+        c_summary = ", ".join([f"{count} in {c}" for c, count in categories.items()]) if categories else "no scanned files"
+        return (
+            f"I organize files into designated folders based on their extensions and contents: Study Hub, Photos, PDFs, Videos, Documents, and more. "
+            f"For your current workspace, I have mapped: **{c_summary}**."
+        )
+
+    if "study" in msg or "exam" in msg or "academic" in msg:
+        if study_files:
+            return (
+                f"I detected {len(study_files)} study-related files (like lecture notes, homework, assignments) and placed them in the **Study Hub** folder. "
+                f"Files include: {', '.join(study_files[:5])}."
+            )
+        return "I scan for academic keywords like *notes*, *assignment*, *syllabus*, or *lecture* to organize them into your **Study Hub**. I didn't see any matching study files in this scan, but let me know if you want me to help look for specific documents!"
+
+    if "hello" in msg or "hi" in msg or "hey" in msg:
+        return (
+            "Greetings! I am **s0ucipher**, your AI organizer. I can help you analyze your folder structures, "
+            "explain why files are flagged as High or Low priority, and restructure them. What would you like to know about your files?"
+        )
+
+    if total_files > 0:
+        return (
+            f"I am actively monitoring your workspace with **{total_files}** scanned files in memory. "
+            f"You have {priorities.get('High', 0)} high-importance items and {categories.get('Study', 0)} academic files. "
+            "Ask me about a specific file, why certain items are prioritized, or how I organize them!"
+        )
+
+    return (
+        "I am s0ucipher, your smart file management agent. It looks like you haven't scanned any files or folders yet. "
+        "Add some items in the sidebar and click **Organize Batch** so I can analyze them for you!"
+    )
